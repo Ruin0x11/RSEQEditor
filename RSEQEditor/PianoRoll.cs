@@ -20,14 +20,14 @@ namespace RSEQEditor
             public void Draw(Graphics g, int x, int y, SolidBrush b, Pen p)
             {
                 var gap = 1;
-                var _x = x + tick * Params.ScaleX;
-                var _y = (int)(note * 100 * Params.ScaleY) - y;
+                var _x = tick * Params.ScaleX - x;
+                var _y = (int)((127 - note) * 100 * Params.ScaleY) - y;
                 var _w = (int)(length * Params.ScaleX);
                 var _h = (int)(100 * Params.ScaleY);
                 b.Color = ControlPaint.Dark(color, 0.25f);
                 g.FillRectangle(b, _x, _y, _w, _h);
                 b.Color = color;
-                g.FillRectangle(b, _x+gap+1, _y, _w-gap-1, _h-gap);
+                g.FillRectangle(b, _x + gap + 1, _y, _w - gap - 1, _h - gap);
                 p.Color = Color.DarkGray;
                 g.DrawRectangle(p, _x, _y, _w, _h);
                 b.Color = Color.Black;
@@ -35,8 +35,30 @@ namespace RSEQEditor
             }
         }
 
+        internal class LabelDrawable
+        {
+            public int tick;
+            public Color color;
+            public string text;
+
+            public void Draw(Graphics g, int x, int y, SolidBrush b, Pen p)
+            {
+                var _x = tick * Params.ScaleX - x;
+                var _y = 0;
+                var _h = g.VisibleClipBounds.Height;
+                b.Color = color;
+                g.FillRectangle(b, _x, _y, 50, 20);
+                g.DrawString(text, Params.baseFont8, b, _x + 55, _y);
+                p.Color = color;
+                g.DrawLine(p, _x, _y, _x, _h);
+            }
+        }
+
         private RSEQNode _node;
+        private int _track;
         private List<NoteDrawable> _drawObjects;
+        private List<LabelDrawable> _labelObjects;
+        private Dictionary<int, int> _offsetToTick;
         public SolidBrush _brush = new SolidBrush(Color.DarkGray);
         public SolidBrush _noteBrush = new SolidBrush(Color.AliceBlue);
         public Pen _pen = new Pen(Color.Black);
@@ -44,23 +66,51 @@ namespace RSEQEditor
         public PianoRoll()
         {
             _drawObjects = new List<NoteDrawable>();
+            _labelObjects = new List<LabelDrawable>();
+            _offsetToTick = new Dictionary<int, int>();
         }
 
         public void SetNode(RSEQNode node)
         {
             _node = node;
+            _track = 0;
+
+            UpdateDrawObjects();
+        }
+
+        public void SetTrack(int track)
+        {
+            if (_node == null || !_node.Song.Tracks.ContainsKey(track))
+                return;
+
+            _track = track;
 
             UpdateDrawObjects();
         }
 
         private void UpdateDrawObjects()
         {
-            _drawObjects.Clear();
+            _offsetToTick.Clear();
 
             int tick = 0;
-            foreach (MMLCommand cmd in _node.Commands)
+            foreach (MMLCommand cmd in _node.Song.Tracks[_track])
             {
-                if (cmd._cmd == Mml.NOTE_ON || cmd._cmd == Mml.MML_WAIT)
+                _offsetToTick.Add(cmd._offset, tick);
+
+                int? len;
+                if ((len = cmd.GetLength()).HasValue)
+                {
+                    tick += len.Value;
+                }
+            }
+
+            _drawObjects.Clear();
+
+            tick = 0;
+            foreach (MMLCommand cmd in _node.Song.Tracks[_track])
+            {
+                int? len;
+                if ((len = cmd.GetLength()).HasValue)
                 {
                     var note = (int)cmd._value1.Value;
                     var color = Color.AliceBlue;
@@ -71,19 +121,38 @@ namespace RSEQEditor
                         color = Color.DarkGray;
                         text = "Rest";
                     }
-                    var len = (int)cmd.GetLength();
+
                     NoteDrawable obj = new NoteDrawable
                     {
                         note = note,
                         tick = tick,
-                        length = len,
+                        length = len.Value,
                         color = color,
                         text = text
                     };
                     _drawObjects.Add(obj);
-                    tick += len;
+                    tick += len.Value;
                 }
             }
+
+            _labelObjects.Clear();
+
+            foreach (RSEQLabelNode label in _node.Children)
+            {
+                int labelTick;
+                if (_offsetToTick.TryGetValue((int)label.Id, out labelTick))
+                {
+                    LabelDrawable obj = new LabelDrawable
+                    {
+                        tick = labelTick,
+                        text = label.Name,
+                        color = Color.Blue
+                    };
+                    _labelObjects.Add(obj);
+                }
+            }
+
+            Refresh();
         }
 
         protected override void OnMouseDown(MouseEventArgs e)
@@ -258,6 +327,10 @@ namespace RSEQEditor
             }
 
             foreach (NoteDrawable obj in _drawObjects)
+            {
+                obj.Draw(pe.Graphics, stdx + key_width, stdy, _brush, _pen);
+            }
+            foreach (LabelDrawable obj in _labelObjects)
             {
                 obj.Draw(pe.Graphics, stdx + key_width, stdy, _brush, _pen);
             }

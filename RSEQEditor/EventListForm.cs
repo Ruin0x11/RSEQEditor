@@ -30,7 +30,7 @@ namespace RSEQEditor
 
             if (MainForm.Instance.Rseq != null)
             {
-                foreach (var cmd in MainForm.Instance.Rseq.Commands)
+                foreach (var cmd in MainForm.Instance.Rseq.Song.Tracks[0])
                 {
                     myList.Add(cmd);
                 }

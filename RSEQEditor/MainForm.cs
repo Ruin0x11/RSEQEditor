@@ -19,20 +19,20 @@ namespace RSEQEditor
         public static MainForm Instance { get { return _instance == null ? _instance = new MainForm() : _instance; } }
 
         private RSEQNode _rseq;
-        public RSEQNode Rseq { get { return _rseq;  } }
+        public RSEQNode Rseq { get { return _rseq; } }
+
+        private BindingList<int> _trackList;
 
         private int _key_width = 40;
 
         public int std_x = 0;
         public int std_y = 0;
 
-        private BindingList<MMLCommand> myList;
-
         public MainForm()
         {
             InitializeComponent();
 
-            myList = new BindingList<MMLCommand>();
+            _trackList = new BindingList<int>();
 
             panel1.SuspendLayout();
             pianoRoll1.SuspendLayout();
@@ -46,8 +46,8 @@ namespace RSEQEditor
 
             vScrollBar1.Left = pianoRoll1.Left;
             vScrollBar1.Top = pianoRoll1.Top;
-            vScrollBar1.Height = pianoRoll1.Height; 
-            
+            vScrollBar1.Height = pianoRoll1.Height;
+
             hScrollBar1.Left = pianoRoll1.Left;
             hScrollBar1.Top = pianoRoll1.Top + pianoRoll1.Height + 4;
             hScrollBar1.Width = pianoRoll1.Width;
@@ -71,10 +71,10 @@ namespace RSEQEditor
             int draft_vscroll_value = (int)((draft_start_to_draw_y * (double)vScrollBar1.Maximum) / (128 * (int)(100 * Params.ScaleY) - vScrollBar1.Height));
             vScrollBar1.Value = draft_vscroll_value;
             std_y = calculateStartToDrawY(vScrollBar1.Value);
-            
+
             this.Bounds = Params.config.WindowRect;
             Rectangle rc2 = Screen.GetWorkingArea(this);
-            if (this.Bounds.X < rc2.X || rc2.X + rc2.Width  < this.Bounds.X + this.Bounds.Width ||
+            if (this.Bounds.X < rc2.X || rc2.X + rc2.Width < this.Bounds.X + this.Bounds.Width ||
                 this.Bounds.Y < rc2.Y || rc2.Y + rc2.Height < this.Bounds.Y + this.Bounds.Height)
             {
                 this.Bounds = new Rectangle(rc2.X, rc2.Y, this.Bounds.Width, this.Bounds.Height);
@@ -218,7 +218,7 @@ namespace RSEQEditor
             }
 
             if (_rseq == null) return;
-            int l = (int)_rseq.CalculateLength();
+            int l = _rseq.CalculateLength();
             float scalex = Params.ScaleX;
             int key_width = _key_width;
             int pict_piano_roll_width = pwidth - key_width;
@@ -336,31 +336,89 @@ namespace RSEQEditor
             RefreshScreen();
         }
 
+        public void SetNode(RSEQNode rseq)
+        {
+            _rseq = rseq;
+            updateScrollRangeHorizontal();
+            updateScrollRangeVertical();
+
+            _trackList.Clear();
+            foreach (var track in _rseq.Song.Tracks.Keys)
+            {
+                _trackList.Add(track);
+            }
+            listBox1.DataSource = _trackList;
+
+            pianoRoll1.SetNode(rseq);
+        }
+
         public void Reset()
         {
-            myList.Clear();
-
             if (Program.RootNode != null)
             {
                 RSARSoundNode node = (RSARSoundNode)Program.RootNode.FindChild("RP/SSN/HAPPY/BIRTHDAY/SCORE", true);
                 RSEQNode rseq = (RSEQNode)node._soundFileNode;
-                _rseq = rseq;
-                pianoRoll1.SetNode(rseq);
 
-                foreach (var cmd in rseq.Commands)
-                {
-                    myList.Add(cmd);
-                }
+                SetNode(rseq);
             }
             else
             {
-                pianoRoll1.SetNode(null);
+                SetNode(null);
             }
         }
 
         private void pianoRoll1_MouseMove(object sender, MouseEventArgs e)
         {
             RefreshScreen();
+        }
+
+        private void listBox1_SelectedValueChanged(object sender, EventArgs e)
+        {
+            ListBox lb = (ListBox)sender;
+            pianoRoll1.SetTrack((int)lb.SelectedItem);
+        }
+
+        private struct TrackInfo
+        {
+            public Color Color;
+            public string Description;
+
+            public TrackInfo(Color color, string description)
+            {
+                Color = color;
+                Description = description;
+            }
+        }
+
+        private static readonly Dictionary<int, TrackInfo> TRACK_INFOS = new Dictionary<int, TrackInfo>
+        {
+            { 0, new TrackInfo(Color.Red, "Melody") },
+            { 1, new TrackInfo(Color.Orange, "Harmony") },
+            { 2, new TrackInfo(Color.Yellow, "Chord") },
+            { 3, new TrackInfo(Color.Green, "Bass") },
+            { 4, new TrackInfo(Color.Blue, "Percussion 1") },
+            { 5, new TrackInfo(Color.Purple, "Percussion 2") },
+            { 6, new TrackInfo(Color.Cyan, "Percussion 3") },
+            { 7, new TrackInfo(Color.Magenta, "Percussion 4") },
+        };
+
+        private void listBox1_DrawItem(object sender, DrawItemEventArgs e)
+        {
+            ListBox lb = (ListBox)sender;
+            e.DrawBackground();
+
+            var track = (int)listBox1.SelectedItem;
+            var info = TRACK_INFOS[track];
+            var brush = new SolidBrush(info.Color);
+            e.Graphics.DrawString($"Track {track} ({info.Description})", e.Font, brush, e.Bounds, StringFormat.GenericDefault);
+            e.DrawFocusRectangle();
+
+            lb.Refresh();
+        }
+
+        private void songPropertiesToolStripMenuItem_Click(object sender, EventArgs e)
+        {
+            new EditSongPropertiesForm().ShowDialog(MainForm.Instance, WiiMusic.SONGS[0]);
         }
     }
 }

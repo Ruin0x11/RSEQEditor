@@ -8,8 +8,8 @@ namespace BrawlLib.SSBB.ResourceNodes
         internal RSEQHeader* Header { get { return (RSEQHeader*)WorkingUncompressed.Address; } }
         public override ResourceType ResourceType { get { return ResourceType.RSEQ; } }
 
-        public MMLCommand[] _cmds;
-        public MMLCommand[] Commands { get { return _cmds; } }
+        public MMLSong _song;
+        public MMLSong Song { get { return _song; } }
 
         public UnsafeBuffer _dataBuffer;
 
@@ -21,7 +21,7 @@ namespace BrawlLib.SSBB.ResourceNodes
             Memory.Move(_dataBuffer.Address, Header->Data, (uint)Header->_dataLength);
             SetSizeInternal(Header->_dataLength);
 
-            _cmds = MMLParser.Parse(Header->Data + 12);
+            _song = MMLParser.Parse((byte*)Header->Data + 12);
 
             return true;
         }
@@ -64,7 +64,7 @@ namespace BrawlLib.SSBB.ResourceNodes
 
             //MML Parser is not complete yet, so copy raw data over
             Memory.Move((VoidPtr)header + header->_dataOffset, _dataBuffer.Address, (uint)_dataBuffer.Length);
-            
+
             builder.Write((VoidPtr)header + header->_lablOffset);
         }
 
@@ -77,16 +77,9 @@ namespace BrawlLib.SSBB.ResourceNodes
 
         internal static ResourceNode TryParse(DataSource source) { return ((RSEQHeader*)source.Address)->_header._tag == RSEQHeader.Tag ? new RSEQNode() : null; }
 
-        public uint CalculateLength()
+        public int CalculateLength()
         {
-            uint len = 0;
-
-            foreach (var cmd in Commands)
-            {
-                len += cmd.GetLength();
-            }
-
-            return len;
+            return Song.CalculateLength();
         }
     }
 }

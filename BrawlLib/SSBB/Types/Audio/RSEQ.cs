@@ -38,6 +38,33 @@ namespace BrawlLib.SSBBTypes
         public VoidPtr MMLCommands { get { return (Address + _baseOffset); } }
     }
 
+    public class MMLSong
+    {
+        public Dictionary<int, MMLCommand[]> Tracks;
+
+        public MMLSong()
+        {
+            Tracks = new Dictionary<int, MMLCommand[]>();
+        }
+
+        public int CalculateLength()
+        {
+            int max = 0;
+
+            foreach (var track in Tracks.Values)
+            {
+                int len = 0;
+                foreach (var cmd in track)
+                {
+                    len += cmd.GetLength().GetValueOrDefault(0);
+                }
+                max = Math.Max(len, max);
+            }
+
+            return max;
+        }
+    }
+
     public class MMLCommand
     {
         public Mml _cmd { get; set; }
@@ -46,6 +73,7 @@ namespace BrawlLib.SSBBTypes
         public uint? _value3 { get; set; }
         public uint? _value4 { get; set; }
         public uint? _value5 { get; set; }
+        public int _offset { get; set; }
 
         public MMLCommand() { }
         public MMLCommand(Mml cmd)
@@ -90,7 +118,7 @@ namespace BrawlLib.SSBBTypes
 
         public override string ToString()
         {
-            return $"{_cmd}: 0x{_value1:x} 0x{_value2:x} 0x{_value3:x} 0x{_value4:x} 0x{_value5:x}";
+            return $"{_cmd}@{_offset}: 0x{_value1:x} 0x{_value2:x} 0x{_value3:x} 0x{_value4:x} 0x{_value5:x}";
         }
 
         public bool IsSigned()
@@ -98,16 +126,16 @@ namespace BrawlLib.SSBBTypes
             return false;
         }
 
-        public uint GetLength()
+        public int? GetLength()
         {
             switch (_cmd)
             {
                 case Mml.MML_WAIT:
-                    return _value1.Value;
+                    return (int)_value1.Value;
                 case Mml.NOTE_ON:
-                    return _value3.Value;
+                    return (int)_value3.Value;
                 default:
-                    return 0;
+                    return null;
             }
         }
     }
@@ -162,183 +190,205 @@ namespace BrawlLib.SSBBTypes
             return sb.ToString();
         }
 
-        public static MMLCommand[] Parse(VoidPtr address)
+        public static MMLSong Parse(VoidPtr address)
         {
-            List<MMLCommand> commands = new List<MMLCommand>();
+            MMLSong song = new MMLSong();
 
-            Mml cmd = 0x00;
             byte* addr = (byte*)address;
+            int offset = 0;
 
-            do
+            Dictionary<int, int> knownTracks = new Dictionary<int, int>
             {
-                uint value = 0;
-                uint value2 = 0;
-                uint value3 = 0;
-                uint value4 = 0;
-                uint subCmd = 0;
+                { 0, 0 }
+            };
 
-                byte b = (*addr++);
-                if (b < 0x80)
+            int track;
+            while (knownTracks.TryGetValue(offset, out track))
+            {
+                List<MMLCommand> commands = new List<MMLCommand>();
+                Mml cmd = 0x00;
+                do
                 {
+                    uint value = 0;
+                    uint value2 = 0;
+                    uint value3 = 0;
+                    uint value4 = 0;
+                    uint subCmd = 0;
+                    MMLCommand mmlCmd = null;
 
-                    value = ReadVarLen(ref addr);
-                    uint key = b;
-                    uint velocity = (*addr++);
-                    uint length = ReadVarLen(ref addr);
-                    commands.Add(new MMLCommand(Mml.NOTE_ON, key, velocity, length));
-                }
-                else
-                {
-                    cmd = (Mml)b;
-                    switch (cmd)
+                    byte b = (*addr++);
+                    if (b < 0x80)
                     {
-                        // 0-arg commands
-                        case Mml.MML_RET:
-                        case Mml.MML_LOOP_END:
-                        case Mml.MML_FIN:
-                            commands.Add(new MMLCommand(cmd));
-                            break;
-
-                        // varlen commands
-                        case Mml.MML_WAIT:
-                        case Mml.MML_PRG:
-                            value = ReadVarLen(ref addr);
-                            commands.Add(new MMLCommand(cmd, value));
-                            break;
-
-                        case Mml.MML_OPEN_TRACK:
-                            value = (*addr++);
-                            value2 = ReadUnsigned24(ref addr);
-                            commands.Add(new MMLCommand(cmd, value, value2));
-                            break;
-                        case Mml.MML_JUMP:
-                        case Mml.MML_CALL:
-                            value = ReadUnsigned24(ref addr);
-                            commands.Add(new MMLCommand(cmd, value));
-                            break;
-
-                        case Mml.MML_VARIABLE:
-                            subCmd = (*addr++);
-                            if (subCmd >= 0xb0 && subCmd <= 0xbd)
-                            {
-                                value = (*addr++);
-                            }
-                            value2 = (*addr++);
-                            commands.Add(new MMLCommand(cmd, subCmd, value, value2));
-                            break;
-                        case Mml.MML_IF:
-                            subCmd = (*addr++);
-                            if (subCmd >= 0xb0 && subCmd <= 0xbd)
-                            {
-                                value = (*addr++);
-                            }
-                            value2 = (*addr++);
-                            value3 = (*addr++);
-                            commands.Add(new MMLCommand(cmd, subCmd, value, value2, value3));
-                            break;
-                        //case Mml.MML_TIME:
-                        //case Mml.MML_TIME_RANDOM:
-                        //case Mml.MML_TIME_VARIABLE:
-                        //    break;
-
-                        // u8 argument commands
-                        case Mml.MML_TIMEBASE:
-                        case Mml.MML_ENV_HOLD:
-                        case Mml.MML_MONOPHONIC:
-                        case Mml.MML_VELOCITY_RANGE:
-                        case Mml.MML_BIQUAD_TYPE:
-                        case Mml.MML_BIQUAD_VALUE:
-                        case Mml.MML_PAN:
-                        case Mml.MML_VOLUME:
-                        case Mml.MML_MAIN_VOLUME:
-                        case Mml.MML_TRANSPOSE:
-                        case Mml.MML_PITCH_BEND:
-                        case Mml.MML_BEND_RANGE:
-                        case Mml.MML_PRIO:
-                        case Mml.MML_NOTE_WAIT:
-                        case Mml.MML_TIE:
-                        case Mml.MML_PORTA:
-                        case Mml.MML_MOD_DEPTH:
-                        case Mml.MML_MOD_SPEED:
-                        case Mml.MML_MOD_TYPE:
-                        case Mml.MML_MOD_RANGE:
-                        case Mml.MML_PORTA_SW:
-                        case Mml.MML_PORTA_TIME:
-                        case Mml.MML_ATTACK:
-                        case Mml.MML_DECAY:
-                        case Mml.MML_SUSTAIN:
-                        case Mml.MML_RELEASE:
-                        case Mml.MML_LOOP_START:
-                        case Mml.MML_EXPRESSION:
-                        case Mml.MML_PRINTVAR:
-                        case Mml.MML_SURROUND_PAN:
-                        case Mml.MML_LPF_CUTOFF:
-                        case Mml.MML_FXSEND_A:
-                        case Mml.MML_FXSEND_B:
-                        case Mml.MML_MAINSEND:
-                        case Mml.MML_INIT_PAN:
-                        case Mml.MML_MUTE:
-                        case Mml.MML_FXSEND_C:
-                        case Mml.MML_DAMPER:
-                            value = (*addr++);
-                            commands.Add(new MMLCommand(cmd, value));
-                            break;
-
-                        // extended commands
-                        case Mml.MML_EX_COMMAND:
-                            MmlEx cmdEx = (MmlEx)(*addr++);
-                            switch (cmdEx)
-                            {
-                                case MmlEx.MML_SETVAR: break;
-                                case MmlEx.MML_ADDVAR: break;
-                                case MmlEx.MML_SUBVAR: break;
-                                case MmlEx.MML_MULVAR: break;
-                                case MmlEx.MML_DIVVAR: break;
-                                case MmlEx.MML_SHIFTVAR: break;
-                                case MmlEx.MML_RANDVAR: break;
-                                case MmlEx.MML_ANDVAR: break;
-                                case MmlEx.MML_ORVAR: break;
-                                case MmlEx.MML_XORVAR: break;
-                                case MmlEx.MML_NOTVAR: break;
-                                case MmlEx.MML_MODVAR: break;
-                                case MmlEx.MML_CMP_EQ: break;
-                                case MmlEx.MML_CMP_GE: break;
-                                case MmlEx.MML_CMP_GT: break;
-                                case MmlEx.MML_CMP_LE: break;
-                                case MmlEx.MML_CMP_LT: break;
-                                case MmlEx.MML_CMP_NE: break;
-                                case MmlEx.MML_USERPROC: break;
-                            }
-                            value = (*addr++);
-                            value2 = (*addr++);
-                            value3 = (*addr++);
-                            value4 = (*addr++);
-                            commands.Add(new MMLCommand(cmd, (uint)cmdEx, value, value2, value3, value4));
-                            break;
-
-                        case Mml.MML_ALLOC_TRACK:
-                            value = ReadUnsigned16(ref addr);
-                            commands.Add(new MMLCommand(cmd, value));
-                            break;
-
-                        default:
-                            byte[] arr = new byte[0x10];
-                            Marshal.Copy((IntPtr)addr, arr, 0, 0x10);
-                            var str = PrintBytes(arr);
-                            Marshal.Copy((IntPtr)addr - 0x10, arr, 0, 0x10);
-                            var str2 = PrintBytes(arr);
-                            //throw new Exception($"Unknown MML command: 0x{b:x2}\n{str2}\n{str}");
-                            break;
+                        value = ReadVarLen(ref addr);
+                        uint key = b;
+                        uint velocity = (*addr++);
+                        uint length = ReadVarLen(ref addr);
+                        mmlCmd = new MMLCommand(Mml.NOTE_ON, key, velocity, length);
                     }
+                    else
+                    {
+                        cmd = (Mml)b;
+                        switch (cmd)
+                        {
+                            // 0-arg commands
+                            case Mml.MML_RET:
+                            case Mml.MML_LOOP_END:
+                            case Mml.MML_FIN:
+                                mmlCmd = new MMLCommand(cmd);
+                                break;
+
+                            // varlen commands
+                            case Mml.MML_WAIT:
+                            case Mml.MML_PRG:
+                                value = ReadVarLen(ref addr);
+                                mmlCmd = new MMLCommand(cmd, value);
+                                break;
+
+                            case Mml.MML_OPEN_TRACK:
+                                value = (*addr++);
+                                value2 = ReadUnsigned24(ref addr);
+                                mmlCmd = new MMLCommand(cmd, value, value2);
+                                if (!knownTracks.ContainsKey((int)value2))
+                                {
+                                    knownTracks.Add((int)value2, (int)value);
+                                }
+                                break;
+                            case Mml.MML_JUMP:
+                            case Mml.MML_CALL:
+                                value = ReadUnsigned24(ref addr);
+                                mmlCmd = new MMLCommand(cmd, value);
+                                break;
+
+                            case Mml.MML_VARIABLE:
+                                subCmd = (*addr++);
+                                if (subCmd >= 0xb0 && subCmd <= 0xbd)
+                                {
+                                    value = (*addr++);
+                                }
+                                value2 = (*addr++);
+                                mmlCmd = new MMLCommand(cmd, subCmd, value, value2);
+                                break;
+                            case Mml.MML_IF:
+                                subCmd = (*addr++);
+                                if (subCmd >= 0xb0 && subCmd <= 0xbd)
+                                {
+                                    value = (*addr++);
+                                }
+                                value2 = (*addr++);
+                                value3 = (*addr++);
+                                mmlCmd = new MMLCommand(cmd, subCmd, value, value2, value3);
+                                break;
+                            //case Mml.MML_TIME:
+                            //case Mml.MML_TIME_RANDOM:
+                            //case Mml.MML_TIME_VARIABLE:
+                            //    break;
+
+                            // u8 argument commands
+                            case Mml.MML_TIMEBASE:
+                            case Mml.MML_ENV_HOLD:
+                            case Mml.MML_MONOPHONIC:
+                            case Mml.MML_VELOCITY_RANGE:
+                            case Mml.MML_BIQUAD_TYPE:
+                            case Mml.MML_BIQUAD_VALUE:
+                            case Mml.MML_PAN:
+                            case Mml.MML_VOLUME:
+                            case Mml.MML_MAIN_VOLUME:
+                            case Mml.MML_TRANSPOSE:
+                            case Mml.MML_PITCH_BEND:
+                            case Mml.MML_BEND_RANGE:
+                            case Mml.MML_PRIO:
+                            case Mml.MML_NOTE_WAIT:
+                            case Mml.MML_TIE:
+                            case Mml.MML_PORTA:
+                            case Mml.MML_MOD_DEPTH:
+                            case Mml.MML_MOD_SPEED:
+                            case Mml.MML_MOD_TYPE:
+                            case Mml.MML_MOD_RANGE:
+                            case Mml.MML_PORTA_SW:
+                            case Mml.MML_PORTA_TIME:
+                            case Mml.MML_ATTACK:
+                            case Mml.MML_DECAY:
+                            case Mml.MML_SUSTAIN:
+                            case Mml.MML_RELEASE:
+                            case Mml.MML_LOOP_START:
+                            case Mml.MML_EXPRESSION:
+                            case Mml.MML_PRINTVAR:
+                            case Mml.MML_SURROUND_PAN:
+                            case Mml.MML_LPF_CUTOFF:
+                            case Mml.MML_FXSEND_A:
+                            case Mml.MML_FXSEND_B:
+                            case Mml.MML_MAINSEND:
+                            case Mml.MML_INIT_PAN:
+                            case Mml.MML_MUTE:
+                            case Mml.MML_FXSEND_C:
+                            case Mml.MML_DAMPER:
+                                value = (*addr++);
+                                mmlCmd = new MMLCommand(cmd, value);
+                                break;
+
+                            // extended commands
+                            case Mml.MML_EX_COMMAND:
+                                MmlEx cmdEx = (MmlEx)(*addr++);
+                                switch (cmdEx)
+                                {
+                                    case MmlEx.MML_SETVAR: break;
+                                    case MmlEx.MML_ADDVAR: break;
+                                    case MmlEx.MML_SUBVAR: break;
+                                    case MmlEx.MML_MULVAR: break;
+                                    case MmlEx.MML_DIVVAR: break;
+                                    case MmlEx.MML_SHIFTVAR: break;
+                                    case MmlEx.MML_RANDVAR: break;
+                                    case MmlEx.MML_ANDVAR: break;
+                                    case MmlEx.MML_ORVAR: break;
+                                    case MmlEx.MML_XORVAR: break;
+                                    case MmlEx.MML_NOTVAR: break;
+                                    case MmlEx.MML_MODVAR: break;
+                                    case MmlEx.MML_CMP_EQ: break;
+                                    case MmlEx.MML_CMP_GE: break;
+                                    case MmlEx.MML_CMP_GT: break;
+                                    case MmlEx.MML_CMP_LE: break;
+                                    case MmlEx.MML_CMP_LT: break;
+                                    case MmlEx.MML_CMP_NE: break;
+                                    case MmlEx.MML_USERPROC: break;
+                                }
+                                value = (*addr++);
+                                value2 = (*addr++);
+                                value3 = (*addr++);
+                                value4 = (*addr++);
+                                mmlCmd = new MMLCommand(cmd, (uint)cmdEx, value, value2, value3, value4);
+                                break;
+
+                            case Mml.MML_ALLOC_TRACK:
+                                value = ReadUnsigned16(ref addr);
+                                mmlCmd = new MMLCommand(cmd, value);
+                                break;
+
+                            default:
+                                byte[] arr = new byte[0x10];
+                                Marshal.Copy((IntPtr)addr, arr, 0, 0x10);
+                                var str = PrintBytes(arr);
+                                Marshal.Copy((IntPtr)addr - 0x10, arr, 0, 0x10);
+                                var str2 = PrintBytes(arr);
+                                //throw new Exception($"Unknown MML command: 0x{b:x2}\n{str2}\n{str}");
+                                break;
+                        }
+                    }
+
+                    if (mmlCmd != null)
+                    {
+                        mmlCmd._offset = offset;
+                        commands.Add(mmlCmd);
+                    }
+                    offset = (addr - address);
+                } while (cmd != Mml.MML_FIN && !knownTracks.ContainsKey(offset));
+
+                // TODO
+                if (!song.Tracks.ContainsKey(track))
+                {
+                    song.Tracks.Add(track, commands.ToArray());
                 }
-            } while (cmd != Mml.MML_FIN);
-
-            byte[] arr5 = new byte[addr-address];
-            Marshal.Copy((IntPtr)address, arr5, 0, addr - address);
-            var str5 = PrintBytes(arr5);
-            Console.WriteLine(str5);
-
-            return commands.ToArray();
+            }
+            return song;
         }
     }
 

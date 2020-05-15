@@ -175,5 +175,8 @@
 
         Havok = 0x8500,
         HavokGroup = 0x8501,
+
+        BMG = 0x8600,
+        DATEntry = 0x8700,
     }
 }

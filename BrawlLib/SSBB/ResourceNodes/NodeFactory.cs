@@ -41,7 +41,7 @@ namespace BrawlLib.SSBB.ResourceNodes
             { "MRGC", typeof(MRGNode) }, //Compressed MRG
             { "DOL", typeof(DOLNode) },
             { "REL", typeof(RELNode) },
-            { "CARC", typeof(U8Node) }, // Compressed U8
+            { "CARC", typeof(U8Node) },
         };
 
         //Parser commands must initialize the node before returning.
